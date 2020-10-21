@@ -1,11 +1,7 @@
-FROM tensorflow/tensorflow:latest-py3-jupyter as base
-
-ENV DEBIAN_FRONTEND noninteractive
+FROM ubuntu:18.04 as base
 
 RUN apt-get update \
-    && apt-get upgrade -y \
-    # && apt-get install -y --no-install-recommends \
-    && apt-get install -y \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
     rsync \
     gzip \
     bzip2 \
@@ -23,7 +19,9 @@ RUN apt-get update \
     libopenblas-dev \
     python3-dev \
     python3-scipy \
+    python3-sklearn \
     python3-numpy \
+    python3-pandas \
     python3-numexpr \
     python3-urwid \
     python3-cffi \
@@ -67,10 +65,6 @@ RUN apt-get update \
     libblosc-dev \
     subversion \
     wget \
-    vim \
-    fish \
-    npm \
-    nodejs \
     && update-alternatives --install /usr/bin/python python \
     /usr/bin/python3 0 \
     # && mkdir /opt/i3-data /opt/i3-data/i3-test-data \
@@ -89,21 +83,6 @@ WORKDIR /home/icecube/combo/build
 
 RUN cmake /home/icecube/combo/src \
     && make -j2
-
-FROM base as extras
-
-USER root
-
-run apt-get install -y \
-    python3-pip \
-    python3-setuptools \
-    python3-wheel
-
-USER icecube
-
-ENV PATH="/home/icecube/.local/bin:${PATH}"
-
-RUN pip3 install --user streamlit plotly pandas tables scikit-learn
 
 ENTRYPOINT ["/bin/bash", "/home/icecube/combo/build/env-shell.sh", "exec"]
 CMD ["/bin/bash"]
