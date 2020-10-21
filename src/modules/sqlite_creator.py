@@ -1,7 +1,10 @@
 from datetime import datetime
+from datetime import timedelta
+from pathlib import Path
 import sqlite3
 
 import numpy as np
+import pandas as pd
 
 from I3Tray import I3Tray
 from icecube import icetray
@@ -12,58 +15,174 @@ from icecube import dataio
 from icecube import millipede, photonics_service
 from icecube.common_variables import time_characteristics
 
+feature_columns = {
+    "event_no": {"type": int, "nullable": False, "primary": False},
+    "string": {"type": int, "nullable": False, "primary": False},
+    "dom": {"type": int, "nullable": False, "primary": False},
+    "pmt": {"type": int, "nullable": False, "primary": False},
+    "x": {"type": float, "nullable": False, "primary": False},
+    "y": {"type": float, "nullable": False, "primary": False},
+    "z": {"type": float, "nullable": False, "primary": False},
+    "time": {"type": float, "nullable": False, "primary": False},
+    "charge_log10": {"type": float, "nullable": False, "primary": False},
+    "lc": {"type": bool, "nullable": False},
+    "pulse_width": {"type": int, "nullable": False},
+    "SplitInIcePulses": {"type": bool, "nullable": False, "primary": False},
+    "SRTInIcePulses": {"type": bool, "nullable": True, "primary": False},
+}
+truth_columns = {
+    "event_no": {"type": int, "nullable": False, "primary": True},
+    "energy_log10": {"type": float, "nullable": True, "primary": False},
+    "time": {"type": float, "nullable": True, "primary": False},
+    "vertex_x": {"type": float, "nullable": True, "primary": False},
+    "vertex_y": {"type": float, "nullable": True, "primary": False},
+    "vertex_z": {"type": float, "nullable": True, "primary": False},
+    "direction_x": {"type": float, "nullable": True, "primary": False},
+    "direction_y": {"type": float, "nullable": True, "primary": False},
+    "direction_z": {"type": float, "nullable": True, "primary": False},
+    "azimuth": {"type": float, "nullable": True, "primary": False},
+    "zenith": {"type": float, "nullable": True, "primary": False},
+    "pid": {"type": int, "nullable": True, "primary": False},
+    "interaction_type": {"type": int, "nullable": True, "primary": False},
+    "muon_track_length": {"type": float, "nullable": True, "primary": False},
+    "stopped_muon": {"type": int, "nullable": True, "primary": False},
+}
 
-def create_db(DB, particle_type, level, include_truth, include_reconstruction):
-    print("{}: creating DB".format(datetime.now().strftime("%H:%M:%S")))
-    with sqlite3.connect(str(DB)) as con:
+sql_create_features_table = """
+    CREATE TABLE features (
+        row INTEGER PRIMARY KEY NOT NULL,
+        event_no INTEGER NOT NULL,
+        string INTEGER NOT NULL,
+        dom INTEGER NOT NULL,
+        pmt INTEGER NOT NULL,
+        x REAL NOT NULL,
+        y REAL NOT NULL,
+        z REAL NOT NULL,
+        time INTEGER NOT NULL,
+        charge_log10 REAL NOT NULL,
+        lc INTEGER,
+        pulse_width INTEGER,
+        SplitInIcePulses INTEGER,
+        SRTInIcePulses INTEGER
+    );
+"""
+
+sql_create_truth_table = """
+    CREATE TABLE IF NOT EXISTS truth (
+        event_no INTEGER PRIMARY KEY NOT NULL,
+        energy_log10 REAL,
+        time REAL,
+        vertex_x REAL,
+        vertex_y REAL,
+        vertex_z REAL,
+        direction_x REAL,
+        direction_y REAL,
+        direction_z REAL,
+        azimuth REAL,
+        zenith REAL,
+        pid INTEGER,
+        interaction_type INTEGER,
+        muon_track_length REAL,
+        stopped_muon INTEGER
+    );
+"""
+
+sql_update_features = """
+    INSERT INTO features({}) VALUES ({})
+""".format(
+    ", ".join(list(feature_columns.keys())),
+    ", ".join(["?"] * len(list(feature_columns.keys()))),
+)
+sql_update_truth = """
+    INSERT INTO truth({}) VALUES ({})
+""".format(
+    ", ".join(list(truth_columns.keys())),
+    ", ".join(["?"] * len(list(truth_columns.keys()))),
+)
+
+
+def create_db(out_db):
+    print("{}: creating DB".format(datetime.now()))
+    with sqlite3.connect(str(out_db)) as con:
         cursor = con.cursor()
         cursor.execute(sql_create_features_table)
-        if include_truth:
-            cursor.execute(sql_create_truth_table)
-        if include_reconstruction:
-            cursor.execute(sql_create_reconstruction_table)
-        cursor.execute(sql_create_meta_table)
 
 
-def calculate_sigma(data):
-    sigma_pos = data["upper_bound"] - data["median"]
-    sigma_neg = data["median"] - data["lower_bound"]
-    return (sigma_pos + sigma_neg) / 2
+def create_truth_table(out_db):
+    print("{}: creating truth table".format(datetime.now()))
+    with sqlite3.connect(str(out_db)) as con:
+        cursor = con.cursor()
+        cursor.execute(sql_create_truth_table)
 
 
-def convert_spherical_to_cartesian(zenith, azimuth):
-    """Convert spherical coordinates to Cartesian coordinates.
+def get_candidate_events(meta_db, query):
+    with sqlite3.connect(str(meta_db)) as con:
+        candidate_events = pd.read_sql(query, con)
+    return candidate_events
 
-    Assumes unit length.
 
-    Zenith: theta
-    Azimuth: phi
+def calculate_displaced_point(position, direction, length):
+    position_to_direction = direction - position
+    normed_position_to_direction = position_to_direction / np.linalg.norm(
+        position_to_direction
+    )
+    displaced_point = position + length * normed_position_to_direction
+    return displaced_point
 
-    Args:
-        zenith (numpy.ndarray): zenith/polar angle
-        azimuth (numpy.ndarray): azimuthal angle
 
-    Returns:
-        numpy.ndarray: x, y, z (event, coordinates) vector
-    """
-    theta = zenith
-    phi = azimuth
-    x = np.sin(theta) * np.cos(phi)
-    y = np.sin(theta) * np.sin(phi)
-    z = np.cos(theta)
-    vectors = np.array((x, y, z)).T
-    return vectors
+def check_if_point_inside_cylinder(position, direction, length):
+    displaced_point = calculate_displaced_point(position, direction, length)
+    origin, z, radius = fiducial_volume_icecube()
+    pt1 = np.array((origin[0], origin[1], z[0]))
+    pt2 = np.array((origin[0], origin[1], z[1]))
+    vec = pt2 - pt1
+    const = radius * np.linalg.norm(vec)
+    inside_ends = (
+        np.dot(displaced_point - pt1, vec) >= 0
+        and np.dot(displaced_point - pt2, vec) <= 0
+    )
+    inside_radius = np.linalg.norm(np.cross(displaced_point - pt1, vec)) <= const
+    if inside_ends and inside_radius:
+        return 1
+    else:
+        return 0
+
+
+def fiducial_volume_deepcore():
+    origin = np.array((46.29, -34.88, -330.0))
+    z = np.array((-500, -200))
+    radius = 150
+    return origin, z, radius
+
+
+def fiducial_volume_icecube():
+    origin = np.array((0, 0, 0))
+    z = np.array((-513, 525))
+    radius = 600
+    return origin, z, radius
 
 
 def fetch_events(frame, inputs):
     features = inputs[0]
     truth = inputs[1]
-    reconstruction = inputs[2]
-    meta = inputs[3]
-    file_name = inputs[4]
-    level = inputs[5]
-    last_event_no = inputs[6]
-    particle_type = inputs[7]
+    dataframe = inputs[2]
+
+    if frame["I3EventHeader"].sub_event_stream != "InIceSplit":
+        return False
+
+    event_id = frame["I3EventHeader"].event_id
+    sub_event_id = frame["I3EventHeader"].sub_event_id
+
+    dataframe = dataframe[
+        (dataframe["event_id"] == event_id)
+        & (dataframe["sub_event_id"] == sub_event_id)
+    ]
+    if dataframe.empty:
+        return False
+
+    event_no = dataframe["event_no"].values[0]
+    pid = dataframe["pid"].values[0]
+    event_length = dataframe["raw_event_length"].values[0]
 
     try:
         uncleaned_pulses = frame["SplitInIcePulses"].apply(frame)
@@ -73,37 +192,26 @@ def fetch_events(frame, inputs):
             uncleaned_pulses = frame["SplitInIcePulses"].apply(frame)
             cleaned_pulses = frame["SplitInIcePulsesSRT"].apply(frame)
         except Exception as e:
-            print(str(e))
             return False
 
-    if particle_type == "neutrino" and level == 5:
-        reconstruction_result = frame["retro_crs_prefit__median__neutrino"]
-        reconstruction_valid = True
-    # if particle_type == "neutrino" and level is None:
-    #     reconstruction_result = frame["MonopodFit4"]
-    #     reconstruction_valid = True
-    else:
-        reconstruction_valid = False
+    test_event_length = sum(len(x) for x in uncleaned_pulses.values())
+
+    assert event_length == test_event_length, "Whoops! Event lenghts are not the same!"
 
     try:
         mc_tree = frame["I3MCTree"]
         truth_valid = True
-        if particle_type == "muon":
+        if abs(pid) == 13:
             true_primary = dataclasses.get_most_energetic_muon(mc_tree)
-        elif particle_type == "neutrino" or particle_type == "upgrade":
+        else:
             true_primary = dataclasses.get_most_energetic_primary(mc_tree)
     except Exception as e:
         truth_valid = False
 
     dom_geom = frame["I3Geometry"].omgeo
 
-    event_length = sum(len(x) for x in uncleaned_pulses.values())
-    event_no = last_event_no[-1] + 1
-    last_event_no.append(event_no)
-
-    features_temp = np.zeros((event_length, 14))
+    features_temp = np.zeros((event_length, len(feature_columns) - 1))
     truth_temp = np.zeros(len(truth_columns))
-    reconstruction_temp = np.zeros(len(reconstruction_columns))
 
     cleaned_time_list = []
     for om_key, pulses in cleaned_pulses.items():
@@ -124,8 +232,6 @@ def fetch_events(frame, inputs):
                 pulse.time,
                 pulse.charge,
                 (pulse.flags & 0x1) >> 0,
-                (pulse.flags & 0x2) >> 1,
-                (pulse.flags & 0x4) >> 2,
                 pulse.width,
                 1,
                 1 if pulse.time in cleaned_time_list else 0,
@@ -136,7 +242,6 @@ def fetch_events(frame, inputs):
         features.append(
             (
                 int(event_no),
-                int(i),
                 int(features_temp[i, 0]),
                 int(features_temp[i, 1]),
                 int(features_temp[i, 2]),
@@ -149,8 +254,6 @@ def fetch_events(frame, inputs):
                 int(features_temp[i, 9]),
                 int(features_temp[i, 10]),
                 int(features_temp[i, 11]),
-                bool(features_temp[i, 12]),
-                bool(features_temp[i, 13]),
             )
         )
 
@@ -169,314 +272,107 @@ def fetch_events(frame, inputs):
         truth_temp[9] = true_primary_direction.azimuth
         truth_temp[10] = true_primary_direction.zenith
         truth_temp[11] = true_primary.pdg_encoding
-    else:
-        truth_temp = np.full(len(truth_columns), np.nan)
-    truth.append(tuple([truth_temp[i] for i in range(truth_temp.shape[0])]))
-
-    if reconstruction_valid:
-        reconstruction_position = reconstruction_result.pos
-        reconstruction_direction = reconstruction_result.dir
-        reconstruction_temp[0] = event_no
-        reconstruction_temp[1] = np.log10(reconstruction_result.energy)
-        reconstruction_temp[2] = reconstruction_result.time
-        reconstruction_temp[3] = reconstruction_position.x
-        reconstruction_temp[4] = reconstruction_position.y
-        reconstruction_temp[5] = reconstruction_position.z
-        reconstruction_temp[9] = reconstruction_direction.azimuth
-        reconstruction_temp[10] = reconstruction_direction.zenith
-        directions = spherical_to_cartesian(
-            reconstruction_temp[9], reconstruction_temp[10]
+        truth_temp[13] = true_primary.length
+        position = np.array(
+            (
+                true_primary_entry_position.x,
+                true_primary_entry_position.y,
+                true_primary_entry_position.z,
+            )
         )
-        reconstruction_temp[6] = directions[0]
-        reconstruction_temp[7] = directions[0]
-        reconstruction_temp[8] = directions[0]
-        reconstruction_temp[11] = reconstruction_result.pdg_encoding
-        # try:
-        #     reconstruction_temp[9] = abs(
-        #         np.log10((calculate_sigma(frame["retro_crs_prefit__energy"])))
-        #     )
-        #     reconstruction_temp[10] = abs(
-        #         calculate_sigma(frame["retro_crs_prefit__time"])
-        #     )
-        #     reconstruction_temp[11] = abs(calculate_sigma(frame["retro_crs_prefit__x"]))
-        #     reconstruction_temp[12] = abs(calculate_sigma(frame["retro_crs_prefit__y"]))
-        #     reconstruction_temp[13] = abs(calculate_sigma(frame["retro_crs_prefit__z"]))
-        #     reconstruction_temp[14] = abs(
-        #         calculate_sigma(frame["retro_crs_prefit__azimuth"])
-        #     )
-        #     reconstruction_temp[15] = abs(
-        #         calculate_sigma(frame["retro_crs_prefit__zenith"])
-        #     )
-        #     for i in range(9, 16):
-        #         if reconstruction_temp[i] == 0.0:
-        #             reconstruction_temp[i] = np.nan
-        # except Exception as e:
-        #     print(str(e))
-        #     for i in range(9, 16):
-        #         reconstruction_temp[i] = np.nan
-        reconstruction_temp[np.isinf(reconstruction_temp)] = np.nan
-    else:
-        reconstruction_temp = np.full(len(reconstruction_columns), np.nan)
-    reconstruction.append(
-        tuple([reconstruction_temp[i] for i in range(reconstruction_temp.shape[0])])
-    )
-
-    meta.append(
-        (
-            int(event_no),
-            str(file_name),
-            int(frame["I3EventHeader"].event_id),
-            level,
-            str(frame["I3EventHeader"].start_time),
-            str(frame["I3EventHeader"].end_time),
+        direction = np.array(
+            (
+                true_primary_direction.x,
+                true_primary_direction.y,
+                true_primary_direction.z,
+            )
         )
-    )
+        try:
+            truth_temp[12] = frame["I3MCWeightDict"]["InteractionType"]
+        except Exception as e:
+            truth_temp[12] = np.nan
+        if (truth_temp[12] == 1 and abs(pid) == 14) or abs(pid) == 13:
+            true_muon = dataclasses.get_most_energetic_muon(mc_tree)
+            truth_temp[13] = true_muon.length
+            stopped = check_if_point_inside_cylinder(
+                position, direction, truth_temp[13]
+            )
+            truth_temp[14] = stopped
+        else:
+            truth_temp[13] = np.nan
+            truth_temp[14] = np.nan
+        truth.append(tuple([truth_temp[i] for i in range(truth_temp.shape[0])]))
 
 
 def i3_to_list_of_tuples(inputs):
     i3_file = inputs[0]
     gcd_file = inputs[1]
+    dataframe = inputs[2]
     features = []
     truth = []
-    reconstruction = []
-    meta = []
-    file_name = i3_file.name
-    level = inputs[2]
-    last_event_no = inputs[3]
-    particle_type = inputs[4]
     tray = I3Tray()
     tray.AddModule("I3Reader", "reader", FilenameList=[str(gcd_file)] + [str(i3_file)])
     tray.Add(
         fetch_events,
         "fetch_events",
-        inputs=(
-            features,
-            truth,
-            reconstruction,
-            meta,
-            file_name,
-            level,
-            last_event_no,
-            particle_type,
-        ),
+        inputs=(features, truth, dataframe),
     )
     tray.Execute()
     tray.Finish()
-    return features, truth, reconstruction, meta, last_event_no
+    return features, truth
 
 
-feature_columns = {
-    "event_no": {"type": int, "nullable": False, "primary": False},
-    "pulse_no": {"type": int, "nullable": False, "primary": False},
-    "dom_string": {"type": int, "nullable": False, "primary": False},
-    "dom_pmt": {"type": int, "nullable": False, "primary": False},
-    "dom_om": {"type": int, "nullable": False, "primary": False},
-    "dom_x": {"type": float, "nullable": False, "primary": False},
-    "dom_y": {"type": float, "nullable": False, "primary": False},
-    "dom_z": {"type": float, "nullable": False, "primary": False},
-    "dom_time": {"type": float, "nullable": False, "primary": False},
-    "dom_charge": {"type": float, "nullable": False, "primary": False},
-    "dom_lc": {"type": bool, "nullable": False},
-    "dom_atwd": {"type": bool, "nullable": False},
-    "dom_fadc": {"type": bool, "nullable": False},
-    "dom_pulse_width": {"type": int, "nullable": False},
-    "SplitInIcePulses": {"type": bool, "nullable": False, "primary": False},
-    "SRTInIcePulses": {"type": bool, "nullable": True, "primary": False},
-}
-truth_columns = {
-    "event_no": {"type": int, "nullable": False, "primary": True},
-    "energy_log10": {"type": float, "nullable": True, "primary": False},
-    "time": {"type": float, "nullable": True, "primary": False},
-    "position_x": {"type": float, "nullable": True, "primary": False},
-    "position_y": {"type": float, "nullable": True, "primary": False},
-    "position_z": {"type": float, "nullable": True, "primary": False},
-    "direction_x": {"type": float, "nullable": True, "primary": False},
-    "direction_y": {"type": float, "nullable": True, "primary": False},
-    "direction_z": {"type": float, "nullable": True, "primary": False},
-    "azimuth": {"type": float, "nullable": True, "primary": False},
-    "zenith": {"type": float, "nullable": True, "primary": False},
-    "pid": {"type": int, "nullable": True, "primary": False},
-}
-reconstruction_columns = {
-    "event_no": {"type": int, "nullable": False, "primary": True},
-    "energy_log10": {
-        "type": float,
-        "nullable": True,
-        "primary": False,
-    },
-    "time": {"type": float, "nullable": True, "primary": False},
-    "position_x": {"type": float, "nullable": True, "primary": False},
-    "position_y": {"type": float, "nullable": True, "primary": False},
-    "position_z": {"type": float, "nullable": True, "primary": False},
-    "direction_x": {"type": float, "nullable": True, "primary": False},
-    "direction_y": {"type": float, "nullable": True, "primary": False},
-    "direction_z": {"type": float, "nullable": True, "primary": False},
-    "azimuth": {"type": float, "nullable": True, "primary": False},
-    "zenith": {"type": float, "nullable": True, "primary": False},
-    "pid": {"type": int, "nullable": True, "primary": False},
-    # "sigma_energy_log10": {"type": float, "nullable": True, "primary": False},
-    # "sigma_time": {"type": float, "nullable": True, "primary": False},
-    # "sigma_position_x": {"type": float, "nullable": True, "primary": False},
-    # "sigma_position_y": {"type": float, "nullable": True, "primary": False},
-    # "sigma_position_z": {"type": float, "nullable": True, "primary": False},
-    # "sigma_azimuth": {"type": float, "nullable": True, "primary": False},
-    # "sigma_zenith": {"type": float, "nullable": True, "primary": False},
-}
-meta_columns = {
-    "event_no": {"type": int, "nullable": False, "primary": True},
-    "file": {"type": str, "nullable": False, "primary": False},
-    "idx": {"type": int, "nullable": False, "primary": False},
-    "level": {"type": int, "nullable": True, "primary": False},
-    "start_time": {"type": str, "nullable": True, "primary": False},
-    "end_time": {"type": str, "nullable": True, "primary": False},
-}
+def create_sqlite_db(dataset_name, query):
+    meta_db = Path().home().joinpath("work").joinpath("datasets").joinpath("meta.db")
+    data_db = Path().home().joinpath("data").joinpath(dataset_name + ".db")
+    create_db(data_db)
 
-sql_create_features_table = """
-    CREATE TABLE features (
-        row INTEGER PRIMARY KEY NOT NULL,
-        event_no INTEGER NOT NULL,
-        pulse_no INTEGER NOT NULL,
-        dom_string INTEGER NOT NULL,
-        dom_pmt INTEGER NOT NULL,
-        dom_om INTEGER NOT NULL,
-        dom_x REAL NOT NULL,
-        dom_y REAL NOT NULL,
-        dom_z REAL NOT NULL,
-        dom_time INTEGER NOT NULL,
-        dom_charge REAL NOT NULL,
-        dom_lc INTEGER,
-        dom_atwd INTEGER,
-        dom_fadc INTEGER,
-        dom_pulse_width INTEGER,
-        SplitInIcePulses INTEGER,
-        SRTInIcePulses INTEGER
-    );
-"""
+    candidate_events = get_candidate_events(meta_db, query)
 
-sql_create_truth_table = """
-    CREATE TABLE truth (
-        event_no INTEGER PRIMARY KEY NOT NULL,
-        energy_log10 REAL,
-        time REAL,
-        position_x REAL,
-        position_y REAL,
-        position_z REAL,
-        direction_x REAL,
-        direction_y REAL,
-        direction_z REAL,
-        azimuth REAL,
-        zenith REAL,
-        pid INTEGER
-    );
-"""
-sql_create_reconstruction_table = """
-    CREATE TABLE reconstruction (
-        event_no INTEGER PRIMARY KEY NOT NULL,
-        energy_log10 REAL,
-        time REAL,
-        position_x REAL,
-        position_y REAL,
-        position_z REAL,
-        direction_x REAL,
-        direction_y REAL,
-        direction_z REAL,
-        azimuth REAL,
-        zenith REAL,
-        pid INTEGER
-    );
-"""
-sql_create_meta_table = """
-    CREATE TABLE meta (
-        event_no INTEGER PRIMARY KEY NOT NULL,
-        file TEXT NOT NULL,
-        idx INTEGER NOT NULL,
-        level INTEGER,
-        start_time TEXT,
-        end_time TEXT
-    );
-"""
+    deltas = []
 
-sql_update_features = """
-    INSERT INTO features({}) VALUES ({})
-""".format(
-    ", ".join(list(feature_columns.keys())),
-    ", ".join(["?"] * len(list(feature_columns.keys()))),
-)
-sql_update_truth = """
-    INSERT INTO truth({}) VALUES ({})
-""".format(
-    ", ".join(list(truth_columns.keys())),
-    ", ".join(["?"] * len(list(truth_columns.keys()))),
-)
-sql_update_reconstruction = """
-    INSERT INTO reconstruction({}) VALUES ({})
-""".format(
-    ", ".join(list(reconstruction_columns.keys())),
-    ", ".join(["?"] * len(list(reconstruction_columns.keys()))),
-)
-sql_update_meta = """
-    INSERT INTO meta({}) VALUES ({})
-""".format(
-    ", ".join(list(meta_columns.keys())),
-    ", ".join(["?"] * len(list(meta_columns.keys()))),
-)
-
-
-def create_sqlite_db(
-    paths,
-    level,
-    no_files,
-    particle_type,
-    include_truth,
-    include_reconstruction,
-    write_to_db=True,
-):
-    dataset_root = paths["raw_files"]
-    db = paths["fast_db"]
-    gcd_file = [
-        file for file in dataset_root.joinpath("gcd").iterdir() if file.is_file
-    ][0]
-    i3_files_root = dataset_root.joinpath("i3")
-
-    i3_files = [file for file in i3_files_root.iterdir() if file.is_file()]
-    if no_files == 1:
-        i3_files = [i3_files[0]]
-    elif no_files is None:
-        i3_files = i3_files
-    else:
-        i3_files = i3_files[0:no_files]
-
-    if write_to_db:
-        create_db(db, particle_type, level, include_truth, include_reconstruction)
-
-    last_event_no = [0]
-    for i3_file in i3_files:
-        now = datetime.now().strftime("%H:%M:%S")
-        print("{}: Retrieving from {}".format(now, i3_file.name))
-        last_event_no = [last_event_no[-1]]
-        inputs = (i3_file, gcd_file, level, last_event_no, particle_type)
-        features, truth, reconstruction, meta, last_event_no = i3_to_list_of_tuples(
-            inputs
+    for i, files in enumerate(candidate_events["files"].unique()):
+        start = datetime.now()
+        events = candidate_events[candidate_events["files"] == files]
+        i3_file = files.split(",")[0]
+        gcd_file = files.split(",")[1]
+        print("{}: fetching from {}".format(datetime.now(), Path(i3_file).name))
+        features, truth = i3_to_list_of_tuples((i3_file, gcd_file, events))
+        with sqlite3.connect(str(data_db)) as con:
+            cur = con.cursor()
+            print("{}: inserting {} into DB".format(datetime.now(), Path(i3_file).name))
+            cur.executemany(sql_update_features, features)
+            con.commit()
+        if truth:
+            try:
+                with sqlite3.connect(str(data_db)) as con:
+                    cur = con.cursor()
+                    cur.executemany(sql_update_truth, truth)
+            except Exception:
+                create_truth_table(data_db)
+                with sqlite3.connect(str(data_db)) as con:
+                    cur = con.cursor()
+                    cur.executemany(sql_update_truth, truth)
+                    con.commit()
+        end = datetime.now()
+        delta = (end - start).total_seconds()
+        deltas.append(delta)
+        avg_time = sum(deltas) / len(deltas)
+        files_left = len(candidate_events["files"].unique()) - (i + 1)
+        eta_seconds = avg_time * files_left
+        eta_min, eta_sec = divmod(eta_seconds, 60)
+        eta_hour, eta_min = divmod(eta_min, 60)
+        eta_time = datetime.now() + timedelta(seconds=eta_seconds)
+        print(
+            "{}: {} files down, {} to go, ETA {:02d}:{:02d}:{:02d}; that's {}".format(
+                datetime.now(),
+                i + 1,
+                files_left,
+                int(eta_hour),
+                int(eta_min),
+                int(eta_sec),
+                eta_time,
+            )
         )
-        if write_to_db:
-            with sqlite3.connect(str(db)) as con:
-                cur = con.cursor()
-                print(
-                    "{}: inserting {} into DB".format(
-                        datetime.now().strftime("%H:%M:%S"), i3_file.name
-                    )
-                )
-                cur.executemany(sql_update_features, features)
-                if include_truth:
-                    try:
-                        cur.executemany(sql_update_truth, truth)
-                    except Exception as e:
-                        print(str(e))
-                        print(truth[0])
-                if include_reconstruction:
-                    cur.executemany(sql_update_reconstruction, reconstruction)
-                cur.executemany(sql_update_meta, meta)
-                con.commit()
 
-    now = datetime.now().strftime("%H:%M:%S")
-    print("{}: Done!".format(now))
+    print("{}: done".format(datetime.now()))

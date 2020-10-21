@@ -3,7 +3,7 @@ from datetime import datetime
 from inspect import currentframe, getframeinfo
 from pathlib import Path
 
-from modules.sqlite_creator_2 import create_sqlite_db
+from modules.sqlite_creator import create_sqlite_db
 
 
 def get_dataset_paths(dataset_name: str):
@@ -43,7 +43,7 @@ parser.add_argument("-q")
 args = parser.parse_args()
 
 dataset_name = args.n
-query_file = "/groups/hep/ehrhorn/work/cubeflow/" + args.q
+query_file = Path(__file__).parent.parent.resolve() / args.q
 
 with open(query_file, "r") as f:
     query = f.read()

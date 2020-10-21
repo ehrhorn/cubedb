@@ -25,6 +25,6 @@ where
     and abs(meta.pid) in (14)
     and meta.level = 5
     and reconstruction_names.reconstruction_name in ('retro_crs_prefit__median__neutrino')
-order by
-    random()
-limit -1
+-- order by
+--     random()
+limit 100

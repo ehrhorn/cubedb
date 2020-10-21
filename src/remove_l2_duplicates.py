@@ -1,10 +1,13 @@
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
+import pickle
 import sqlite3
 
 retro_file = Path().home().joinpath("data").joinpath("retro_reco_2.db")
-meta_file = Path().home().joinpath("data").joinpath("meta.db")
+meta_file = Path().home().joinpath("data").joinpath("local_meta.db")
+event_no_list = []
+output_file = Path().home() / "duplicates.pkl"
 
 try:
     query = "create index duplicate_idx on meta(event_id, sub_event_id, file_number)"
@@ -14,7 +17,7 @@ try:
 except Exception:
     print("Index already exists")
 
-query = "select event_no from retro_reco"
+query = "select event_no from retro_reco limit -1"
 with sqlite3.connect(retro_file) as con:
     cur = con.cursor()
     cur.execute(query)
@@ -78,11 +81,7 @@ where
                 and duplicate[4] == event_info[0][6]
                 and duplicate[5] == event_info[0][7]
             ):
-                query = "delete from meta where event_no = {}".format(duplicate[0])
-                with sqlite3.connect(meta_file) as con:
-                    cur = con.cursor()
-                    cur.execute(query)
-                    con.commit()
+                event_no_list.append(duplicate[0])
     done_events += 1
     end = datetime.now()
     time_delta = (end - start).total_seconds()
@@ -105,5 +104,8 @@ where
                 eta_time,
             )
         )
+
+with open(output_file, "wb") as f:
+    pickle.dump(event_no_list, f)
 
 print("{}: Done.".format(datetime.now()))
