@@ -20,11 +20,11 @@ from
     inner join gcd_file_names on meta.gcd_file_name = gcd_file_names.row
     inner join run_types on meta.run_type = run_types.row
 where
-    run_types.run_type in ('genie')
+    run_types.run_type in ('upgrade')
     and meta.train = 1
-    and abs(meta.pid) in (14)
-    and meta.level = 5
-    and reconstruction_names.reconstruction_name in ('retro_crs_prefit__median__neutrino')
+    -- and abs(meta.pid) in (14)
+    -- and meta.level = 2
+    -- and reconstruction_names.reconstruction_name in ('retro_crs_prefit__median__neutrino')
 -- order by
 --     random()
-limit 100
+limit 40000

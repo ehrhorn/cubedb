@@ -20,9 +20,13 @@ feature_columns = {
     "string": {"type": int, "nullable": False, "primary": False},
     "dom": {"type": int, "nullable": False, "primary": False},
     "pmt": {"type": int, "nullable": False, "primary": False},
-    "x": {"type": float, "nullable": False, "primary": False},
-    "y": {"type": float, "nullable": False, "primary": False},
-    "z": {"type": float, "nullable": False, "primary": False},
+    "dom_x": {"type": float, "nullable": False, "primary": False},
+    "dom_y": {"type": float, "nullable": False, "primary": False},
+    "dom_z": {"type": float, "nullable": False, "primary": False},
+    "pmt_x": {"type": float, "nullable": False, "primary": False},
+    "pmt_y": {"type": float, "nullable": False, "primary": False},
+    "pmt_z": {"type": float, "nullable": False, "primary": False},
+    "pmt_area": {"type": float, "nullable": False, "primary": False},
     "time": {"type": float, "nullable": False, "primary": False},
     "charge_log10": {"type": float, "nullable": False, "primary": False},
     "lc": {"type": bool, "nullable": False},
@@ -34,9 +38,9 @@ truth_columns = {
     "event_no": {"type": int, "nullable": False, "primary": True},
     "energy_log10": {"type": float, "nullable": True, "primary": False},
     "time": {"type": float, "nullable": True, "primary": False},
-    "vertex_x": {"type": float, "nullable": True, "primary": False},
-    "vertex_y": {"type": float, "nullable": True, "primary": False},
-    "vertex_z": {"type": float, "nullable": True, "primary": False},
+    "position_x": {"type": float, "nullable": True, "primary": False},
+    "position_y": {"type": float, "nullable": True, "primary": False},
+    "position_z": {"type": float, "nullable": True, "primary": False},
     "direction_x": {"type": float, "nullable": True, "primary": False},
     "direction_y": {"type": float, "nullable": True, "primary": False},
     "direction_z": {"type": float, "nullable": True, "primary": False},
@@ -55,9 +59,13 @@ sql_create_features_table = """
         string INTEGER NOT NULL,
         dom INTEGER NOT NULL,
         pmt INTEGER NOT NULL,
-        x REAL NOT NULL,
-        y REAL NOT NULL,
-        z REAL NOT NULL,
+        dom_x REAL NOT NULL,
+        dom_y REAL NOT NULL,
+        dom_z REAL NOT NULL,
+        pmt_x REAL NOT NULL,
+        pmt_y REAL NOT NULL,
+        pmt_z REAL NOT NULL,
+        pmt_area REAL NOT NULL,
         time INTEGER NOT NULL,
         charge_log10 REAL NOT NULL,
         lc INTEGER,
@@ -72,9 +80,9 @@ sql_create_truth_table = """
         event_no INTEGER PRIMARY KEY NOT NULL,
         energy_log10 REAL,
         time REAL,
-        vertex_x REAL,
-        vertex_y REAL,
-        vertex_z REAL,
+        position_x REAL,
+        position_y REAL,
+        position_z REAL,
         direction_x REAL,
         direction_y REAL,
         direction_z REAL,
@@ -221,6 +229,8 @@ def fetch_events(frame, inputs):
     for om_key, pulses in uncleaned_pulses.items():
         om_geom = dom_geom[om_key]
         om_position = om_geom.position
+        om_orientation = om_geom.orientation
+        om_area = om_geom.area
         for pulse in pulses:
             features_temp[row, :] = [
                 om_key[0],
@@ -229,6 +239,10 @@ def fetch_events(frame, inputs):
                 om_position.x,
                 om_position.y,
                 om_position.z,
+                om_orientation.x,
+                om_orientation.y,
+                om_orientation.z,
+                om_area,
                 pulse.time,
                 pulse.charge,
                 (pulse.flags & 0x1) >> 0,
@@ -237,7 +251,7 @@ def fetch_events(frame, inputs):
                 1 if pulse.time in cleaned_time_list else 0,
             ]
             row += 1
-    features_temp = features_temp[features_temp[:, 6].argsort()]
+    features_temp = features_temp[features_temp[:, 10].argsort()]
     for i in range(features_temp.shape[0]):
         features.append(
             (
@@ -249,11 +263,15 @@ def fetch_events(frame, inputs):
                 float(features_temp[i, 4]),
                 float(features_temp[i, 5]),
                 float(features_temp[i, 6]),
-                float(np.log10(features_temp[i, 7])),
-                int(features_temp[i, 8]),
-                int(features_temp[i, 9]),
-                int(features_temp[i, 10]),
-                int(features_temp[i, 11]),
+                float(features_temp[i, 7]),
+                float(features_temp[i, 8]),
+                float(features_temp[i, 9]),
+                float(features_temp[i, 10]),
+                float(np.log10(features_temp[i, 11])),
+                int(features_temp[i, 12]),
+                int(features_temp[i, 13]),
+                int(features_temp[i, 14]),
+                int(features_temp[i, 15]),
             )
         )
 

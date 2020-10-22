@@ -161,8 +161,8 @@ def sqlite_get_event_nos(path):
 def choose_n_random_event_nos(event_nos, size=10000):
     if size > len(event_nos):
         size = len(event_nos)
-    rng = np.random.default_rng(seed=29897070)
-    choices = rng.choice(event_nos, size=size, replace=False)
+    np.random.seed(seed=29897070)
+    choices = np.random.choice(event_nos.flatten(), size=size, replace=False)
     return choices
 
 
@@ -210,9 +210,9 @@ def create_transformers(dataset_name: str):
         now = datetime.now()
         print("{}: Beginning transformation fitting".format(now))
         features = {
-            "x": RobustScaler,
-            "y": RobustScaler,
-            "z": RobustScaler,
+            "dom_x": RobustScaler,
+            "dom_y": RobustScaler,
+            "dom_z": RobustScaler,
             "time": RobustScaler,
             "charge_log10": RobustScaler,
         }
@@ -222,9 +222,9 @@ def create_transformers(dataset_name: str):
             "direction_x": RobustScaler,
             "direction_y": RobustScaler,
             "direction_z": RobustScaler,
-            "vertex_x": RobustScaler,
-            "vertex_y": RobustScaler,
-            "vertex_z": RobustScaler,
+            "position_x": RobustScaler,
+            "position_y": RobustScaler,
+            "position_z": RobustScaler,
             "azimuth": RobustScaler,
             "zenith": RobustScaler,
         }
@@ -1207,9 +1207,7 @@ def histogram_resolution(
     clipped_x_data = np.clip(x_data[:, 1], x_min, x_max)
     clipped_y_data = np.clip(y_data[:, 1], y_min, y_max)
     resolution_num_bins = int(abs(y_max - y_min)) * 6 + 1
-    resolution_bins = np.linspace(
-        y_min, y_max, resolution_num_bins
-    )
+    resolution_bins = np.linspace(y_min, y_max, resolution_num_bins)
     hist_dict["bin_edges"] = resolution_bins
     hist_dict["hist"], _ = np.histogram(clipped_y_data, bins=resolution_num_bins)
     hist_dict["resolution"] = []
