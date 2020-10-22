@@ -84,5 +84,6 @@ WORKDIR /home/icecube/combo/build
 RUN cmake /home/icecube/combo/src \
     && make -j2
 
-ENTRYPOINT ["/bin/bash", "/home/icecube/combo/build/env-shell.sh", "exec"]
-CMD ["/bin/bash"]
+ENV HOME=/home/icecube
+
+ENTRYPOINT ["/home/icecube/combo/build/env-shell.sh"]
