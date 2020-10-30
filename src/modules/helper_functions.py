@@ -443,16 +443,16 @@ def index_db(dataset_name: str):
     ] = """
         CREATE INDEX index_features_event_no ON features(event_no);
     """
-    indexing_queries[
-        "truth"
-    ] = """
-        CREATE UNIQUE INDEX index_truth ON truth(event_no);
-    """
-    indexing_queries[
-        "meta"
-    ] = """
-        CREATE UNIQUE INDEX index_meta ON meta(event_no);
-    """
+    # indexing_queries[
+    #     "truth"
+    # ] = """
+    #     CREATE UNIQUE INDEX index_truth ON truth(event_no);
+    # """
+    # indexing_queries[
+    #     "meta"
+    # ] = """
+    #     CREATE UNIQUE INDEX index_meta ON meta(event_no);
+    # """
     print_message_with_time("indexing DB")
     for query in indexing_queries.values():
         try:
@@ -572,10 +572,17 @@ def create_dataset_distribution_histograms(dataset_name: str, transform: bool = 
         "string",
         "dom",
         "pmt",
+        "pmt_x",
+        "pmt_y",
+        "pmt_z",
+        "pmt_area",
+        "pmt_type",
         "lc",
         "atwd",
         "fadc",
         "pulse_width",
+        "SplitInIcePulses",
+        "SRTInIcePulses",
         "pid",
         "interaction_type",
         "stopped_muon",
@@ -657,7 +664,11 @@ def calculate_1d_histogram(path, column, table, sets, num_bins=100, rice_bins=Tr
     hist_dict = {}
     for iset in sets.keys():
         hist_dict[iset] = {}
-        hist_dict[iset]["bin_edges"] = np.linspace(min_value, max_value, num_bins)
+        try:
+            hist_dict[iset]["bin_edges"] = np.linspace(min_value, max_value, num_bins)
+        except Exception:
+            ok_bool = False
+            return hist_dict, ok_bool
         hist_dict[iset]["hist"] = np.zeros(num_bins - 1, dtype="int32")
         hist_dict[iset]["events"] = len(sets[iset])
         hist_dict[iset]["type"] = "histogram"

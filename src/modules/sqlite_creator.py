@@ -27,6 +27,7 @@ feature_columns = {
     "pmt_y": {"type": float, "nullable": False, "primary": False},
     "pmt_z": {"type": float, "nullable": False, "primary": False},
     "pmt_area": {"type": float, "nullable": False, "primary": False},
+    "pmt_type": {"type": int, "nullable": False, "primary": False},
     "time": {"type": float, "nullable": False, "primary": False},
     "charge_log10": {"type": float, "nullable": False, "primary": False},
     "lc": {"type": bool, "nullable": False},
@@ -66,6 +67,7 @@ sql_create_features_table = """
         pmt_y REAL NOT NULL,
         pmt_z REAL NOT NULL,
         pmt_area REAL NOT NULL,
+        pmt_type INTEGER NOT NULL,
         time INTEGER NOT NULL,
         charge_log10 REAL NOT NULL,
         lc INTEGER,
@@ -231,6 +233,7 @@ def fetch_events(frame, inputs):
         om_position = om_geom.position
         om_orientation = om_geom.orientation
         om_area = om_geom.area
+        om_type = om_geom.omtype
         for pulse in pulses:
             features_temp[row, :] = [
                 om_key[0],
@@ -243,6 +246,7 @@ def fetch_events(frame, inputs):
                 om_orientation.y,
                 om_orientation.z,
                 om_area,
+                om_type,
                 pulse.time,
                 pulse.charge,
                 (pulse.flags & 0x1) >> 0,
@@ -267,11 +271,12 @@ def fetch_events(frame, inputs):
                 float(features_temp[i, 8]),
                 float(features_temp[i, 9]),
                 float(features_temp[i, 10]),
-                float(np.log10(features_temp[i, 11])),
-                int(features_temp[i, 12]),
+                float(features_temp[i, 11]),
+                float(np.log10(features_temp[i, 12])),
                 int(features_temp[i, 13]),
                 int(features_temp[i, 14]),
                 int(features_temp[i, 15]),
+                int(features_temp[i, 16]),
             )
         )
 

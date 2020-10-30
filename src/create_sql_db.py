@@ -4,6 +4,7 @@ from inspect import currentframe, getframeinfo
 from pathlib import Path
 
 from modules.sqlite_creator import create_sqlite_db
+from modules.gcd_to_db import create_gcd_db
 
 
 def get_dataset_paths(dataset_name: str):
@@ -20,12 +21,16 @@ def get_dataset_paths(dataset_name: str):
     transformer_file = meta_path.joinpath("transformers.pkl")
     sets_file = meta_path.joinpath("sets.pkl")
     distributions_file = meta_path.joinpath("distributions.pkl")
+    gcd_file = meta_path.joinpath("gcd.db")
+    sql_file = meta_path.joinpath("query.sql")
     paths["fast_db"] = fast_db
     paths["db"] = slow_db
     paths["meta"] = meta_path
     paths["transformers"] = transformer_file
     paths["sets"] = sets_file
     paths["distributions"] = distributions_file
+    paths["gcd"] = gcd_file
+    paths["query"] = sql_file
     errors_path = dataset_path.joinpath("errors")
     predictions_path = dataset_path.joinpath("predictions")
     errors_path.mkdir(parents=True, exist_ok=True)
@@ -44,6 +49,7 @@ args = parser.parse_args()
 
 dataset_name = args.n
 query_file = Path(__file__).parent.parent.resolve() / args.q
+paths = get_dataset_paths(dataset_name)
 
 with open(query_file, "r") as f:
     query = f.read()
@@ -53,5 +59,8 @@ print(
 )
 
 create_sqlite_db(dataset_name, query)
+create_gcd_db(query, paths)
+with open(paths["query"], "w") as f:
+    f.write(query)
 
 print("{}: Ended creating SQL db for dataset {}".format(datetime.now(), dataset_name))
