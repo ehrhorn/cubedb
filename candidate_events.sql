@@ -1,4 +1,5 @@
-select
+select *
+from (select
     meta.event_no,
     meta.level,
     meta.pid,
@@ -24,9 +25,10 @@ where
     run_types.run_type in ('muongun')
     and meta.train = 1
     and abs(meta.pid) = 13
-limit 100
+limit 100)
 union
-select
+select *
+from (select
     meta.event_no,
     meta.level,
     meta.pid,
@@ -50,11 +52,13 @@ from
     inner join run_types on meta.run_type = run_types.row
 where
     run_types.run_type in ('genie')
+    and meta.level = 5
     and meta.train = 1
     and abs(meta.pid) = 12
-limit 100
+limit 100)
 union
-select
+select *
+from (select
     meta.event_no,
     meta.level,
     meta.pid,
@@ -78,11 +82,13 @@ from
     inner join run_types on meta.run_type = run_types.row
 where
     run_types.run_type in ('genie')
+    and meta.level = 5
     and meta.train = 1
     and abs(meta.pid) = 14
-limit 100
+limit 100)
 union
-select
+select *
+from (select
     meta.event_no,
     meta.level,
     meta.pid,
@@ -106,6 +112,7 @@ from
     inner join run_types on meta.run_type = run_types.row
 where
     run_types.run_type in ('genie')
+    and meta.level = 5
     and meta.train = 1
     and abs(meta.pid) = 16
-limit 100
+limit 100)
