@@ -3,8 +3,9 @@ from datetime import datetime
 from inspect import currentframe, getframeinfo
 from pathlib import Path
 
-from modules.sqlite_creator import create_sqlite_db
 from modules.gcd_to_db import create_gcd_db
+from modules.remove_nc_events import nc_event_remover
+from modules.sqlite_creator import create_sqlite_db
 
 
 def get_dataset_paths(dataset_name: str):
@@ -45,9 +46,11 @@ def get_dataset_paths(dataset_name: str):
 parser = argparse.ArgumentParser()
 parser.add_argument("-n")
 parser.add_argument("-q")
+parser.add_argument("-r")
 args = parser.parse_args()
 
 dataset_name = args.n
+remove_nc = bool(args.r)
 query_file = Path(__file__).parent.parent.resolve() / args.q
 paths = get_dataset_paths(dataset_name)
 
@@ -59,6 +62,10 @@ print(
 )
 
 create_sqlite_db(dataset_name, query)
+
+if remove_nc:
+    print("{}: Removing neutral current events {}".format(datetime.now(), dataset_name))
+    nc_event_remover(dataset_name)
 create_gcd_db(query, paths)
 with open(paths["query"], "w") as f:
     f.write(query)
