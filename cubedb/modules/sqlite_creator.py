@@ -23,9 +23,14 @@ feature_columns = {
     "dom_x": {"type": float, "nullable": False, "primary": False},
     "dom_y": {"type": float, "nullable": False, "primary": False},
     "dom_z": {"type": float, "nullable": False, "primary": False},
+    "dom_r": {"type": float, "nullable": False, "primary": False},
+    "dom_zenith": {"type": float, "nullable": False, "primary": False},
+    "dom_azimuth": {"type": float, "nullable": False, "primary": False},
     "pmt_x": {"type": float, "nullable": False, "primary": False},
     "pmt_y": {"type": float, "nullable": False, "primary": False},
     "pmt_z": {"type": float, "nullable": False, "primary": False},
+    "pmt_zenith": {"type": float, "nullable": False, "primary": False},
+    "pmt_azimuth": {"type": float, "nullable": False, "primary": False},
     "pmt_area": {"type": float, "nullable": False, "primary": False},
     "pmt_type": {"type": int, "nullable": False, "primary": False},
     "time": {"type": float, "nullable": False, "primary": False},
@@ -63,9 +68,14 @@ sql_create_features_table = """
         dom_x REAL NOT NULL,
         dom_y REAL NOT NULL,
         dom_z REAL NOT NULL,
+        dom_r REAL NOT NULL,
+        dom_zenith REAL NOT NULL,
+        dom_azimuth REAL NOT NULL,
         pmt_x REAL NOT NULL,
         pmt_y REAL NOT NULL,
         pmt_z REAL NOT NULL,
+        pmt_zenith REAL NOT NULL,
+        pmt_azimuth REAL NOT NULL,
         pmt_area REAL NOT NULL,
         pmt_type INTEGER NOT NULL,
         time INTEGER NOT NULL,
@@ -172,6 +182,34 @@ def fiducial_volume_icecube():
     return origin, z, radius
 
 
+def convert_cartesian_to_spherical(vectors):
+    """Convert Cartesian coordinates to signed spherical coordinates.
+
+    Converts Cartesian vectors to unit length before conversion.
+
+    Args:
+        vectors (numpy.ndarray): x, y, z coordinates in shape (n, 3)
+
+    Returns:
+        tuple: tuple containing:
+            azimuth (numpy.ndarray): signed azimuthal angles
+            zenith (numpy.ndarray): zenith/polar angles
+    """
+    r = np.linalg.norm(vectors, axis=1).reshape(-1, 1)
+    x = vectors[:, 0]
+    y = vectors[:, 1]
+    z = vectors[:, 2]
+    # azimuth = np.arctan2(y, x).reshape(-1, 1) + np.pi
+    azimuth = np.arctan2(y, x).reshape(-1, 1)
+    zenith = np.arccos(z / r).reshape(-1, 1)
+    return r, zenith, azimuth
+
+
+def translate_origin(unit_vecs, dom_coords):
+    translated_vecs = unit_vecs - dom_coords
+    return translated_vecs
+
+
 def fetch_events(frame, inputs):
     features = inputs[0]
     truth = inputs[1]
@@ -235,6 +273,24 @@ def fetch_events(frame, inputs):
         om_area = om_geom.area
         om_type = om_geom.omtype
         for pulse in pulses:
+            dom_coords = np.array(
+                (om_position.x, om_position.y, om_position.z)
+            ).reshape(1, 3)
+            pmt_unit_vecs = np.array(
+                (
+                    om_orientation.x,
+                    om_orientation.y,
+                    om_orientation.z,
+                )
+            ).reshape(1, 3)
+            angles = convert_cartesian_to_spherical(dom_coords)
+            pmt_angles = convert_cartesian_to_spherical(pmt_unit_vecs)
+            translated_pmt_unit_vecs = translate_origin(
+                pmt_unit_vecs, dom_coords
+            ).reshape(1, 3)
+            translated_pmt_angles = convert_cartesian_to_spherical(
+                translated_pmt_unit_vecs
+            )
             features_temp[row, :] = [
                 om_key[0],
                 om_key[1],
@@ -242,9 +298,14 @@ def fetch_events(frame, inputs):
                 om_position.x,
                 om_position.y,
                 om_position.z,
+                angles[0],
+                angles[1],
+                angles[2],
                 om_orientation.x,
                 om_orientation.y,
                 om_orientation.z,
+                pmt_angles[1],
+                pmt_angles[2],
                 om_area,
                 om_type,
                 pulse.time,
@@ -255,7 +316,7 @@ def fetch_events(frame, inputs):
                 1 if pulse.time in cleaned_time_list else 0,
             ]
             row += 1
-    features_temp = features_temp[features_temp[:, 10].argsort()]
+    features_temp = features_temp[features_temp[:, 16].argsort()]
     for i in range(features_temp.shape[0]):
         features.append(
             (
@@ -272,11 +333,16 @@ def fetch_events(frame, inputs):
                 float(features_temp[i, 9]),
                 float(features_temp[i, 10]),
                 float(features_temp[i, 11]),
-                float(np.log10(features_temp[i, 12])),
-                int(features_temp[i, 13]),
-                int(features_temp[i, 14]),
+                float(features_temp[i, 12]),
+                float(features_temp[i, 13]),
+                float(features_temp[i, 14]),
                 int(features_temp[i, 15]),
                 int(features_temp[i, 16]),
+                float(np.log10(features_temp[i, 17])),
+                int(features_temp[i, 18]),
+                int(features_temp[i, 19]),
+                int(features_temp[i, 20]),
+                int(features_temp[i, 21]),
             )
         )
 
@@ -346,6 +412,8 @@ def i3_to_list_of_tuples(inputs):
 
 
 def create_sqlite_db(dataset_name, query):
+    if "_spherical_" in dataset_name:
+        sherical_transform = True
     meta_db = Path().home().joinpath("work").joinpath("datasets").joinpath("meta.db")
     data_db = Path().home().joinpath("data").joinpath(dataset_name + ".db")
     create_db(data_db)

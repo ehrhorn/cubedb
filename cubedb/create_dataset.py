@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 
 import modules.helper_functions as helper_functions
+from modules.save_random_events import random_events_saver
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--dataset_name", help="dataset name")
@@ -24,5 +25,6 @@ helper_functions.create_dataset_distribution_histograms(dataset_name)
 helper_functions.transform_db(dataset_name)
 helper_functions.create_dataset_distribution_histograms(dataset_name, transform=True)
 helper_functions.move_file(paths["fast_db"], paths["db"])
+random_events_saver(dataset_name, limit=1e4)
 
 helper_functions.print_message_with_time("Created dataset")

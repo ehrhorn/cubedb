@@ -25,6 +25,6 @@ where
     run_types.run_type in ('genie')
     and abs(meta.pid) = 14
     and meta.reconstruction = 2
-    and meta.train = 1
+    and meta.train = 0
     and meta.energy_log10 <= 3
-limit 2e5)
+limit -1)
